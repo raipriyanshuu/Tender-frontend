@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Mapping Test - Tender Backend</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+    }
+    .section {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .section h2 {
+      color: #555;
+      margin-bottom: 15px;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 10px;
+    }
+    .loading {
+      color: #666;
+      font-style: italic;
+    }
+    .error {
+      background: #fee;
+      border: 1px solid #fcc;
+      padding: 15px;
+      border-radius: 4px;
+      color: #c33;
+    }
+    .data-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 15px;
+    }
+    .data-panel {
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 15px;
+      background: #fafafa;
+    }
+    .data-panel h3 {
+      color: #007bff;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    pre {
+      background: #282c34;
+      color: #abb2bf;
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.5;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .mapping-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+    .mapping-table th,
+    .mapping-table td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: left;
+    }
+    .mapping-table th {
+      background: #007bff;
+      color: white;
+    }
+    .mapping-table tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    .mapping-table .raw-value {
+      font-family: monospace;
+      font-size: 11px;
+      color: #666;
+    }
+    .mapping-table .transformed-value {
+      font-family: monospace;
+      font-size: 11px;
+      color: #28a745;
+      font-weight: 600;
+    }
+    .button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    .button:hover {
+      background: #0056b3;
+    }
+    .button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 10px;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.warning {
+      background: #fff3cd;
+      color: #856404;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Tender Data Mapping Test</h1>
+    
+    <div class="section">
+      <h2>API Connection</h2>
+      <button class="button" onclick="fetchDebugData()">Fetch Debug Data</button>
+      <span id="status" class="status"></span>
+      <div id="connection-info"></div>
+    </div>
+
+    <div class="section">
+      <h2>Database Summary</h2>
+      <div id="summary"></div>
+    </div>
+
+    <div class="section">
+      <h2>Raw Database Data</h2>
+      <div class="data-grid">
+        <div class="data-panel">
+          <h3>run_summaries (First Row)</h3>
+          <pre id="raw-run-summaries">Click "Fetch Debug Data" to load...</pre>
+        </div>
+        <div class="data-panel">
+          <h3>file_extractions (First Row)</h3>
+          <pre id="raw-file-extractions">Click "Fetch Debug Data" to load...</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Data Transformation Mapping</h2>
+      <div id="mapping-table-container"></div>
+    </div>
+
+    <div class="section">
+      <h2>Transformed Data (What Frontend Receives)</h2>
+      <pre id="transformed-data">Click "Fetch Debug Data" to load...</pre>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:3001';
+
+    async function fetchDebugData() {
+      const statusEl = document.getElementById('status');
+      const summaryEl = document.getElementById('summary');
+      const rawRunSummariesEl = document.getElementById('raw-run-summaries');
+      const rawFileExtractionsEl = document.getElementById('raw-file-extractions');
+      const transformedDataEl = document.getElementById('transformed-data');
+      const mappingContainer = document.getElementById('mapping-table-container');
+      const connectionInfoEl = document.getElementById('connection-info');
+
+      statusEl.textContent = 'Loading...';
+      statusEl.className = 'status warning';
+
+      try {
+        // Test connection
+        const healthRes = await fetch(`${API_URL}/api/tenders/health`);
+        const health = await healthRes.json();
+        
+        connectionInfoEl.innerHTML = `
+          <p><strong>Backend Status:</strong> 
+            <span class="status ${health.success ? 'success' : 'error'}">
+              ${health.status || 'Unknown'}
+            </span>
+            <strong>Database:</strong> 
+            <span class="status ${health.database === 'connected' ? 'success' : 'error'}">
+              ${health.database || 'Unknown'}
+            </span>
+          </p>
+        `;
+
+        // Fetch debug data
+        const res = await fetch(`${API_URL}/api/tenders/debug/raw`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const data = await res.json();
+
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to fetch debug data');
+        }
+
+        const debug = data.debug;
+
+        // Update summary
+        summaryEl.innerHTML = `
+          <p><strong>run_summaries rows:</strong> ${debug.run_summaries_count}</p>
+          <p><strong>file_extractions rows:</strong> ${debug.file_extractions_count}</p>
+          <p><strong>Transformed tenders:</strong> ${debug.transformation_examples.length}</p>
+        `;
+
+        // Show raw data
+        rawRunSummariesEl.textContent = debug.run_summaries_sample
+          ? JSON.stringify(debug.run_summaries_sample, null, 2)
+          : 'No data in run_summaries table';
+
+        rawFileExtractionsEl.textContent = debug.file_extractions_sample
+          ? JSON.stringify({
+              doc_id: debug.file_extractions_sample.doc_id,
+              filename: debug.file_extractions_sample.filename,
+              extracted_json_keys: Object.keys(debug.file_extractions_sample.extracted_json || {}),
+              extracted_json_sample: {
+                doc_meta: debug.file_extractions_sample.extracted_json?.doc_meta,
+                mandatory_requirements_count: debug.file_extractions_sample.extracted_json?.mandatory_requirements?.length || 0,
+                operative_requirements_count: debug.file_extractions_sample.extracted_json?.operative_requirements?.length || 0,
+                risks_count: debug.file_extractions_sample.extracted_json?.risks?.length || 0
+              }
+            }, null, 2)
+          : 'No data in file_extractions table';
+
+        // Show transformation examples
+        if (debug.transformation_examples.length > 0) {
+          const example = debug.transformation_examples[0];
+          
+          transformedDataEl.textContent = JSON.stringify(example.transformed, null, 2);
+
+          // Create mapping table
+          const mappingTable = createMappingTable(example.raw, example.transformed);
+          mappingContainer.innerHTML = '<h3>Field-by-Field Mapping (First Tender)</h3>' + mappingTable;
+        } else {
+          transformedDataEl.textContent = 'No data to transform. Check if N8N has processed any files.';
+          mappingContainer.innerHTML = '<p class="loading">No transformation examples available.</p>';
+        }
+
+        statusEl.textContent = 'Success';
+        statusEl.className = 'status success';
+
+      } catch (error) {
+        console.error('Error:', error);
+        statusEl.textContent = 'Error';
+        statusEl.className = 'status error';
+        
+        summaryEl.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+        rawRunSummariesEl.textContent = `Error: ${error.message}`;
+        rawFileExtractionsEl.textContent = `Error: ${error.message}`;
+        transformedDataEl.textContent = `Error: ${error.message}`;
+        mappingContainer.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+      }
+    }
+
+    function createMappingTable(raw, transformed) {
+      const mappings = [
+        { field: 'id', rawPath: 'tender_id || doc_id || id', transformed: transformed.id },
+        { field: 'title', rawPath: 'title_de || doc_meta.tender_id || filename', transformed: transformed.title },
+        { field: 'buyer', rawPath: 'client_de || doc_meta.organization', transformed: transformed.buyer },
+        { field: 'region', rawPath: 'region_code || "DE"', transformed: transformed.region },
+        { field: 'deadline', rawPath: 'deadline_date || deadlines.details[0].date', transformed: transformed.deadline },
+        { field: 'score', rawPath: 'scores.total_percent || 0', transformed: transformed.score },
+        { field: 'mustHits', rawPath: 'scores.must_fraction.split("/")[0] || 0', transformed: transformed.mustHits },
+        { field: 'mustTotal', rawPath: 'scores.must_fraction.split("/")[1] || mandatory_requirements.length', transformed: transformed.mustTotal },
+        { field: 'canHits', rawPath: 'scores.can_fraction.split("/")[0] || 0', transformed: transformed.canHits },
+        { field: 'canTotal', rawPath: 'scores.can_fraction.split("/")[1] || operative_requirements.length', transformed: transformed.canTotal },
+        { field: 'legalRisks', rawPath: 'right_side_risks_de || risks.map(r => r.risk)', transformed: Array.isArray(transformed.legalRisks) ? `${transformed.legalRisks.length} items` : transformed.legalRisks },
+      ];
+
+      let table = `
+        <table class="mapping-table">
+          <thead>
+            <tr>
+              <th>Frontend Field</th>
+              <th>Raw Data Path</th>
+              <th>Raw Value (Sample)</th>
+              <th>Transformed Value</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      mappings.forEach(m => {
+        let rawValue = 'N/A';
+        try {
+          if (raw.tender_id) {
+            // From run_summaries
+            rawValue = getNestedValue(raw, m.rawPath.split(' || ')[0]) || 'Not found';
+          } else if (raw.extracted_json) {
+            // From file_extractions
+            rawValue = getNestedValue(raw.extracted_json, m.rawPath.split(' || ')[0]) || 'Not found';
+          }
+        } catch (e) {
+          rawValue = 'Error accessing';
+        }
+
+        table += `
+          <tr>
+            <td><strong>${m.field}</strong></td>
+            <td class="raw-value">${m.rawPath}</td>
+            <td class="raw-value">${JSON.stringify(rawValue).substring(0, 100)}${JSON.stringify(rawValue).length > 100 ? '...' : ''}</td>
+            <td class="transformed-value">${JSON.stringify(m.transformed)}</td>
+          </tr>
+        `;
+      });
+
+      table += `
+          </tbody>
+        </table>
+      `;
+
+      return table;
+    }
+
+    function getNestedValue(obj, path) {
+      return path.split('.').reduce((current, key) => {
+        if (current && key.includes('[')) {
+          const [arrayKey, index] = key.split('[');
+          const idx = parseInt(index.replace(']', ''));
+          return current[arrayKey] && current[arrayKey][idx];
+        }
+        return current && current[key];
+      }, obj);
+    }
+
+    // Auto-fetch on load
+    window.addEventListener('load', () => {
+      setTimeout(fetchDebugData, 500);
+    });
+  </script>
+</body>
+</html>

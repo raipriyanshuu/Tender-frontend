@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Integration Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .success { background: #d1fae5; color: #065f46; }
+        .error { background: #fee2e2; color: #991b1b; }
+        .pending { background: #fef3c7; color: #92400e; }
+        pre {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover { background: #2563eb; }
+        h1 { color: #1f2937; }
+        h2 { color: #374151; font-size: 18px; margin-top: 0; }
+    </style>
+</head>
+<body>
+    <h1>🔌 API Integration Test</h1>
+    <p>This page tests your backend API integration. Open browser console (F12) for details.</p>
+
+    <div class="test-card">
+        <h2>1. Backend Health Check</h2>
+        <p>Status: <span id="health-status" class="status pending">Testing...</span></p>
+        <button onclick="testHealth()">Test Again</button>
+        <pre id="health-result">Waiting for test...</pre>
+    </div>
+
+    <div class="test-card">
+        <h2>2. Fetch Tenders</h2>
+        <p>Status: <span id="tenders-status" class="status pending">Testing...</span></p>
+        <button onclick="testTenders()">Test Again</button>
+        <pre id="tenders-result">Waiting for test...</pre>
+    </div>
+
+    <div class="test-card">
+        <h2>3. Database Status</h2>
+        <p>Status: <span id="db-status" class="status pending">Checking...</span></p>
+        <div id="db-result"></div>
+    </div>
+
+    <div class="test-card">
+        <h2>4. Frontend Integration</h2>
+        <p>✅ Frontend code updated with API calls</p>
+        <p>✅ .env file created with VITE_API_URL</p>
+        <p>✅ Status indicator added to show API connection</p>
+        <a href="http://localhost:5173" target="_blank" style="color: #3b82f6; text-decoration: none;">
+            → Open Frontend (http://localhost:5173)
+        </a>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3001';
+
+        async function testHealth() {
+            const statusEl = document.getElementById('health-status');
+            const resultEl = document.getElementById('health-result');
+            
+            statusEl.textContent = 'Testing...';
+            statusEl.className = 'status pending';
+            
+            try {
+                const response = await fetch(`${API_URL}/api/tenders/health`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    statusEl.textContent = '✅ Connected';
+                    statusEl.className = 'status success';
+                    resultEl.textContent = JSON.stringify(data, null, 2);
+                    updateDbStatus(true);
+                } else {
+                    statusEl.textContent = '⚠️ Backend running but database issue';
+                    statusEl.className = 'status error';
+                    resultEl.textContent = JSON.stringify(data, null, 2);
+                    updateDbStatus(false);
+                }
+            } catch (error) {
+                statusEl.textContent = '❌ Cannot connect';
+                statusEl.className = 'status error';
+                resultEl.textContent = `Error: ${error.message}\n\nMake sure backend is running:\ncd tenderBackend\nnpm run dev`;
+                updateDbStatus(false);
+            }
+        }
+
+        async function testTenders() {
+            const statusEl = document.getElementById('tenders-status');
+            const resultEl = document.getElementById('tenders-result');
+            
+            statusEl.textContent = 'Testing...';
+            statusEl.className = 'status pending';
+            
+            try {
+                const response = await fetch(`${API_URL}/api/tenders`);
+                const data = await response.json();
+                
+                if (data.success && data.data && data.data.length > 0) {
+                    statusEl.textContent = `✅ ${data.count} tenders found`;
+                    statusEl.className = 'status success';
+                    resultEl.textContent = JSON.stringify(data, null, 2);
+                } else if (data.success && data.count === 0) {
+                    statusEl.textContent = '⚠️ No tenders in database';
+                    statusEl.className = 'status pending';
+                    resultEl.textContent = 'Database is empty. Run N8N workflow to populate data.';
+                } else {
+                    statusEl.textContent = '❌ Error';
+                    statusEl.className = 'status error';
+                    resultEl.textContent = JSON.stringify(data, null, 2);
+                }
+            } catch (error) {
+                statusEl.textContent = '❌ Cannot connect';
+                statusEl.className = 'status error';
+                resultEl.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        function updateDbStatus(connected) {
+            const statusEl = document.getElementById('db-status');
+            const resultEl = document.getElementById('db-result');
+            
+            if (connected) {
+                statusEl.textContent = '✅ Tables exist';
+                statusEl.className = 'status success';
+                resultEl.innerHTML = `
+                    <p style="color: #065f46; margin: 10px 0;">
+                        ✅ Database tables are created<br>
+                        ✅ Backend can connect to database
+                    </p>
+                    <p style="color: #6b7280;">
+                        If no tenders show up, it means database is empty. 
+                        Run your N8N workflow to process files.
+                    </p>
+                `;
+            } else {
+                statusEl.textContent = '❌ Need migration';
+                statusEl.className = 'status error';
+                resultEl.innerHTML = `
+                    <p style="color: #991b1b; margin: 10px 0;">
+                        ❌ Database tables missing or connection failed
+                    </p>
+                    <p style="color: #6b7280; margin: 10px 0;">
+                        <strong>Action needed:</strong><br>
+                        1. Go to <a href="https://supabase.com/dashboard" target="_blank">Supabase Dashboard</a><br>
+                        2. Open SQL Editor → New query<br>
+                        3. Copy and paste SQL from: <code>tenderBackend/migrations/create_n8n_tables.sql</code><br>
+                        4. Click "Run"
+                    </p>
+                `;
+            }
+        }
+
+        // Auto-run tests on page load
+        window.onload = () => {
+            console.log('🧪 Running API integration tests...');
+            testHealth();
+            setTimeout(testTenders, 1000);
+        };
+    </script>
+</body>
+</html>
