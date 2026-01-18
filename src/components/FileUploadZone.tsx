@@ -3,7 +3,7 @@ import { Upload, X, FileText, CheckCircle2, AlertCircle, Loader2, Eye } from 'lu
 // import { fileUploadService, UploadBatch, FileUpload } from '@/lib/file-upload-service';
 
 // N8N Webhook URL - Update this with your actual webhook URL
-const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL || 'http://localhost:5678/webhook/tender-upload';
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 interface UploadingFile {
   file: File;
@@ -125,10 +125,11 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({ onTenderCreated 
           );
 
           // Send to N8N webhook
-          const response = await fetch(N8N_WEBHOOK_URL, {
-            method: 'POST',
-            body: formData
-          });
+          const response = await fetch(`${API_BASE_URL}/upload-tender`, {
+  method: 'POST',
+  body: formData
+});
+
 
           if (!response.ok) {
             throw new Error(`Upload failed: ${response.statusText}`);
