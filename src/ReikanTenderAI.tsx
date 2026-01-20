@@ -376,6 +376,10 @@ export default function ReikanTenderAI() {
   const [loadingTenders, setLoadingTenders] = useState<boolean>(false);
   const [tendersError, setTendersError] = useState<string | null>(null);
   const [loadingTenderDetails, setLoadingTenderDetails] = useState<boolean>(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+
+
 
   // Fetch tenders from backend API
   useEffect(() => {
@@ -823,26 +827,47 @@ Einreichungs-ID: ${currentSubmissionId || 'Nicht gespeichert'}
     return sorted;
   }, [query, sortKey, results]);
 
+  // Simple Auth Check (Rendered last to allow hooks to run)
+  if (!isAuthenticated) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-100 p-4">
+        <Card className="w-full max-w-sm shadow-xl">
+          <CardContent className="pt-6">
+            <p className="text-center text-sm text-muted-foreground mb-4">Enter your password</p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                if (fd.get("user") === "admin" && fd.get("pass") === "Tender@2026") {
+                  setIsAuthenticated(true);
+                } else {
+                  alert("Incorrect Credentials");
+                }
+              }}
+              className="space-y-4"
+            >
+              <Input name="user" placeholder="Username" required />
+              <Input name="pass" type="password" placeholder="Password" required />
+              <Button type="submit" className="w-full">
+                Enter
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-zinc-50 to-white p-6">
       <div className="mx-auto max-w-7xl">
-        {/* API Status Indicator */}
-        {loadingTenders && (
-          <div className="mb-4 rounded-lg bg-blue-50 border border-blue-200 p-3 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-            <span className="text-sm text-blue-700">Loading tenders from API...</span>
-          </div>
-        )}
-        {tendersError && (
-          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-600" />
-            <span className="text-sm text-amber-700">Using mock data (API: {tendersError})</span>
-          </div>
-        )}
-        {!loadingTenders && !tendersError && results.length > 0 && results !== MOCK_TENDERS && (
-          <div className="mb-4 rounded-lg bg-green-50 border border-green-200 p-3 flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-            <span className="text-sm text-green-700">✅ Connected to API - Showing {results.length} tenders from database</span>
+        {/* Processing Indicator */}
+        {isProcessing && (
+          <div className="mb-4 rounded-lg bg-blue-600 p-3 text-center text-white shadow-lg animate-pulse">
+            <span className="flex items-center justify-center gap-2 text-sm font-medium">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              File is processing... Data extraction in progress...
+            </span>
           </div>
         )}
 
@@ -899,6 +924,7 @@ Einreichungs-ID: ${currentSubmissionId || 'Nicht gespeichert'}
                 mode={mode}
                 setMode={setMode}
                 onTenderCreated={handleTenderCreated}
+                onProcessingChange={setIsProcessing}
               />
             )}
             {step === 2 && selected && <StepCriteria tender={selected} routeScore={routeScore} onNext={() => setStep(3)} onBack={() => setStep(1)} onImproveScore={handleImproveScore} onExplainWeights={handleExplainWeights} improvingScore={improvingScore} />}
@@ -1012,6 +1038,7 @@ function StepScan({
   mode,
   setMode,
   onTenderCreated,
+  onProcessingChange,
 }: {
   query: string;
   setQuery: (v: string) => void;
@@ -1029,6 +1056,7 @@ function StepScan({
   mode: "search" | "upload";
   setMode: (m: "search" | "upload") => void;
   onTenderCreated: (tenderId: string) => void;
+  onProcessingChange?: (status: boolean) => void;
 }) {
   if (mode === "upload") {
     return (
@@ -1043,7 +1071,7 @@ function StepScan({
             Zurück zur Suche
           </Button>
         </div>
-        <FileUploadZone onTenderCreated={onTenderCreated} />
+        <FileUploadZone onTenderCreated={onTenderCreated} onProcessingChange={onProcessingChange} />
       </div>
     );
   }

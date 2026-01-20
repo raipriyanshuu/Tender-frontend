@@ -19,9 +19,10 @@ interface UploadingFile {
 
 interface FileUploadZoneProps {
   onTenderCreated: (tenderId: string) => void;
+  onProcessingChange?: (status: boolean) => void;
 }
 
-export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
+export const FileUploadZone: React.FC<FileUploadZoneProps> = ({ onTenderCreated, onProcessingChange }) => {
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -33,7 +34,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
 
     const validFiles = Array.from(files).filter(
       f =>
-       
+
         /\.(zip|pdf|docx?|xlsx?)$/i.test(f.name)
     );
 
@@ -55,6 +56,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
   const uploadFiles = async (files: File[]) => {
     setIsUploading(true);
     setError(null);
+    onProcessingChange?.(true);
 
     for (const file of files) {
       try {
@@ -78,6 +80,11 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
           throw new Error('Upload failed');
         }
 
+        const data = await res.json().catch(() => ({}));
+        if (data && data.id) {
+          onTenderCreated(data.id);
+        }
+
         setUploadingFiles(prev =>
           prev.map(f =>
             f.file.name === file.name
@@ -90,11 +97,11 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
           prev.map(f =>
             f.file.name === file.name
               ? {
-                  ...f,
-                  status: 'error',
-                  error: 'Upload failed',
-                  progress: 100,
-                }
+                ...f,
+                status: 'error',
+                error: 'Upload failed',
+                progress: 100,
+              }
               : f
           )
         );
@@ -102,6 +109,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
     }
 
     setIsUploading(false);
+    onProcessingChange?.(false);
   };
 
   const removeFile = (name: string) => {
@@ -128,9 +136,8 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = () => {
           setIsDragging(false);
           handleFileSelect(e.dataTransfer.files);
         }}
-        className={`border-2 border-dashed rounded-xl p-8 text-center ${
-          isDragging ? 'bg-gray-50 border-gray-900' : 'border-gray-300'
-        }`}
+        className={`border-2 border-dashed rounded-xl p-8 text-center ${isDragging ? 'bg-gray-50 border-gray-900' : 'border-gray-300'
+          }`}
       >
         <Upload className="mx-auto h-10 w-10 text-gray-400 mb-2" />
         <p className="text-gray-600 mb-2">
