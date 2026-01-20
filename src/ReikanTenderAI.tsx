@@ -1149,7 +1149,7 @@ function StepScan({
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate font-medium" title={t.title}>{t.title}</h3>
                       <Badge variant="secondary">{t.region === 'DE-BW' ? 'Baden-Württemberg' : t.region}</Badge>
-                      {t.serviceTypes?.map((s, i) => (
+                      {t.serviceTypes?.slice(0, 7).map((s, i) => (
                         <Badge key={i} className="bg-sky-100 text-sky-900">
                           {s}
                         </Badge>
@@ -1214,8 +1214,10 @@ function StepCriteria({ tender, routeScore, onNext, onBack, onImproveScore, onEx
             <div>
               <h4 className="text-sm font-semibold mb-1">Kurzbeschreibung</h4>
               <p className="text-sm text-zinc-700">
-                {tender.buyer} sucht {tender.title}. Leistungsort: {tender.region}.
-                {tender.scopeOfWork && ` ${tender.scopeOfWork.substring(0, 120)}${tender.scopeOfWork.length > 120 ? '...' : ''}`}
+                {tender.buyer} sucht {tender.title}. Leistungsort: {tender.region}.{' '}
+                {tender.scopeOfWork && (
+                  `${tender.scopeOfWork.substring(0, 350)}${tender.scopeOfWork.length > 350 ? '...' : ''}`
+                )}
               </p>
             </div>
 
