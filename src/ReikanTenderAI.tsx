@@ -44,6 +44,7 @@ interface SourceInfo {
   text: string;
   source_document: string;
   source_chunk_id?: string | null;
+  detail?: string;
 }
 
 interface Tender {
@@ -183,6 +184,220 @@ const REQUIRED_Q: { id: string; label: string; hint?: string }[] = [
   { id: "safety", label: "Welche Arbeitssicherheits- und DGUV-Standards erfüllen Ihre Geräte?", hint: "CE-Kennzeichnung, DGUV Vorschrift 52, Betriebsanleitungen, Sicherheitseinweisungen" },
   { id: "emergency", label: "Wie schnell können Sie Ersatzgeräte bei Ausfall bereitstellen?", hint: "Reaktionszeiten, Ersatzgerätepool, Notfallkonzept, 24/7 Erreichbarkeit" },
 ];
+
+const PLACEHOLDERS = new Set([
+  "unbekannt",
+  "unknown",
+  "tbd",
+  "n/a",
+  "nicht vorhanden",
+  "keine angabe",
+  "unspecified",
+  "...",
+  "null",
+  "none",
+  "k.a.",
+]);
+
+const normalizeText = (text: string) =>
+  text.toLowerCase().trim().replace(/\s+/g, " ");
+
+const isPlaceholder = (text?: string | null) => {
+  if (!text) return true;
+  const normalized = normalizeText(text);
+  return normalized.length < 3 || PLACEHOLDERS.has(normalized);
+};
+
+const mergeSourceDocuments = (a?: string, b?: string) => {
+  const parts = new Set(
+    [a, b]
+      .filter(Boolean)
+      .map((value) => (value || "").trim())
+      .filter((value) => value.length > 0)
+  );
+  return Array.from(parts).join("; ");
+};
+
+const pickTopRisks = (risks: any[], metaSource?: string) => {
+  const severityRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+  const deduped = new Map<string, { text: string; source_document: string; source_chunk_id?: string | null; severity: string; index: number }>();
+
+  risks.forEach((risk: any, index: number) => {
+    const text = (risk?.risk_de || risk?.text || "").trim();
+    const severity = (risk?.severity || "").toString().toLowerCase();
+    if (!text || isPlaceholder(text) || !severity) return;
+    const key = normalizeText(text);
+    if (!key) return;
+    const source_document = risk?.source_document || metaSource || "";
+    const source_chunk_id = risk?.source_chunk_id ?? null;
+    if (deduped.has(key)) {
+      const existing = deduped.get(key)!;
+      existing.source_document = mergeSourceDocuments(existing.source_document, source_document);
+      return;
+    }
+    deduped.set(key, { text, source_document, source_chunk_id, severity, index });
+  });
+
+  return Array.from(deduped.values())
+    .sort((a, b) => {
+      const aRank = severityRank[a.severity] || 1;
+      const bRank = severityRank[b.severity] || 1;
+      return bRank - aRank || a.index - b.index;
+    })
+    .slice(0, 5)
+    .map(({ text, source_document, source_chunk_id }) => ({
+      text,
+      source_document,
+      source_chunk_id,
+    }));
+};
+
+const pickTopRequirements = (requirements: any[], metaSource?: string) => {
+  const primarySource = (metaSource || "").trim();
+  const ordered = requirements
+    .map((req: any, index: number) => {
+      const text = (req?.requirement_de || req?.text || "").trim();
+      const detail = (req?.explanation_de || req?.explanation || req?.description_de || "").trim();
+      return {
+        text,
+        detail,
+        source_document: req?.source_document || "",
+        source_chunk_id: req?.source_chunk_id ?? null,
+        index,
+      };
+    })
+    .filter((req: any) => req.text && !isPlaceholder(req.text))
+    .sort((a: any, b: any) => {
+      const aPrimary = a.source_document === primarySource ? 0 : 1;
+      const bPrimary = b.source_document === primarySource ? 0 : 1;
+      return aPrimary - bPrimary || a.index - b.index;
+    });
+
+  const seen = new Set<string>();
+  const result: SourceInfo[] = [];
+  for (const req of ordered) {
+    const key = normalizeText(req.text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      text: req.text,
+      detail: req.detail || undefined,
+      source_document: req.source_document || primarySource || "",
+      source_chunk_id: req.source_chunk_id,
+    });
+    if (result.length >= 5) break;
+  }
+  return result;
+};
+
+const pickTopCriteria = (criteria: any[], metaSource?: string) => {
+  const seen = new Map<string, { text: string; weight: number; source_document: string; source_chunk_id?: string | null }>();
+  criteria.forEach((crit: any) => {
+    const text = (crit?.criterion_de || crit?.text || "").trim();
+    if (!text || isPlaceholder(text)) return;
+    const weight = Number(crit?.weight_percent ?? 0);
+    if (Number.isFinite(weight) && weight === 0) return;
+    const key = normalizeText(text);
+    const source_document = crit?.source_document || metaSource || "";
+    const source_chunk_id = crit?.source_chunk_id ?? null;
+    if (!seen.has(key)) {
+      seen.set(key, { text, weight, source_document, source_chunk_id });
+      return;
+    }
+    const existing = seen.get(key)!;
+    if (weight > existing.weight) {
+      seen.set(key, { text, weight, source_document, source_chunk_id });
+    } else {
+      existing.source_document = mergeSourceDocuments(existing.source_document, source_document);
+    }
+  });
+
+  return Array.from(seen.values())
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 5)
+    .map((item) => ({
+      text: item.weight ? `${item.text} (${item.weight}%)` : item.text,
+      source_document: item.source_document,
+      source_chunk_id: item.source_chunk_id,
+    }));
+};
+
+const pickTopStrings = (items: any[], limit = 5) => {
+  const deduped = new Map<string, string>();
+  items.forEach((item: any) => {
+    const text = (typeof item === "string" ? item : item?.text || "").trim();
+    if (!text || isPlaceholder(text)) return;
+    const key = normalizeText(text);
+    if (!deduped.has(key)) {
+      deduped.set(key, text);
+    }
+  });
+  return Array.from(deduped.values()).slice(0, limit);
+};
+
+const getEconomicText = (value: any) => {
+  const text = typeof value === "object" ? value?.text : value;
+  if (!text || isPlaceholder(String(text))) return "";
+  return String(text);
+};
+
+const buildTimelineSteps = (steps: any[], timeline: any, metaSource?: string) => {
+  const normalized = (value: string) => normalizeText(value);
+  const validSteps = steps
+    .map((step: any, index: number) => ({
+      title_de: (step?.title_de || "").trim(),
+      description_de: (step?.description_de || "").trim(),
+      days_de: (step?.days_de || "").trim(),
+      source_document: step?.source_document || metaSource || "",
+      source_chunk_id: step?.source_chunk_id ?? null,
+      index,
+    }))
+    .filter((step: any) => step.title_de && !isPlaceholder(step.title_de));
+
+  const buckets = [
+    { key: "preparation", label: "Vorbereitung", keywords: ["vorbereitung", "planung", "beschaffung", "bereitstellung"] },
+    { key: "review", label: "Interne Freigabe/Review", keywords: ["freigabe", "review", "prüfung", "genehmigung"] },
+    { key: "submission", label: "Angebotsabgabe", keywords: ["abgabe", "einreich", "submission", "angebot"] },
+    { key: "clarifications", label: "Nachforderungen", keywords: ["nachforderung", "klärung", "rückfrage", "clarification"] },
+    { key: "award", label: "Zuschlag", keywords: ["zuschlag", "vergabeentscheidung", "entscheidung", "award"] },
+    { key: "execution", label: "Leistungsbeginn", keywords: ["leistungsbeginn", "ausführung", "beginn", "start"] },
+  ];
+
+  const bucketed: Record<string, any> = {};
+
+  validSteps.forEach((step: any) => {
+    const haystack = normalized(`${step.title_de} ${step.description_de}`);
+    const bucket = buckets.find((b) => b.keywords.some((keyword) => haystack.includes(keyword)));
+    if (!bucket) return;
+    if (!bucketed[bucket.key]) {
+      bucketed[bucket.key] = step;
+    }
+  });
+
+  if (!bucketed.submission && timeline?.submission_deadline_de) {
+    bucketed.submission = {
+      title_de: "Angebotsabgabe",
+      description_de: `Abgabefrist: ${timeline.submission_deadline_de}`,
+      days_de: "",
+      source_document: timeline.source_document || metaSource || "",
+      source_chunk_id: null,
+      index: Number.MAX_SAFE_INTEGER,
+    };
+  }
+
+  return buckets
+    .map((bucket) => bucketed[bucket.key])
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((step: any, idx: number) => ({
+      step: idx + 1,
+      title_de: step.title_de,
+      description_de: step.description_de,
+      days_de: step.days_de,
+      source_document: step.source_document,
+      source_chunk_id: step.source_chunk_id,
+    }));
+};
 
 // ---------------- Mock data (Construction Equipment Rental - Germany)
 const MOCK_TENDERS: Tender[] = [
@@ -446,10 +661,18 @@ export default function ReikanTenderAI() {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
-        if (data.success && data.data && data.data.length > 0) {
-          setResults(data.data);
+        const payloadList = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : Array.isArray(data?.results)
+              ? data.results
+              : [];
+
+        if (payloadList.length > 0) {
+          setResults(payloadList);
           // Only set selected if we don't have one yet
-          setSelected(prev => prev || data.data[0]);
+          setSelected((prev) => prev || payloadList[0]);
         } else {
           // If no data from API, show empty state (no mock data fallback)
           setResults([]);
@@ -566,8 +789,8 @@ export default function ReikanTenderAI() {
     const serviceTypes = Array.isArray(uiJson.service_types) ? uiJson.service_types : [];
     const evaluationCriteria = Array.isArray(uiJson.evaluation_criteria) ? uiJson.evaluation_criteria : [];
     const safety = Array.isArray(uiJson.safety_requirements) ? uiJson.safety_requirements : [];
-    const penalties = Array.isArray(uiJson.contract_penalties) ? uiJson.contract_penalties : [];
-    const certifications = Array.isArray(uiJson.certifications_required) ? uiJson.certifications_required : [];
+    const penaltiesRaw = Array.isArray(uiJson.contract_penalties) ? uiJson.contract_penalties : [];
+    const certificationsRaw = Array.isArray(uiJson.certifications_required) ? uiJson.certifications_required : [];
     const processSteps = Array.isArray(uiJson.process_steps) ? uiJson.process_steps : [];
     const missingEvidence = Array.isArray(uiJson.missing_evidence_documents) ? uiJson.missing_evidence_documents : [];
 
@@ -575,43 +798,18 @@ export default function ReikanTenderAI() {
       timeline.submission_deadline_de ||
       new Date().toISOString().split('T')[0];
 
-    // Map requirements with source tracking (TOP 5 only)
-    const submissionWithSource = requirements
-      .slice(0, 5)
-      .map((req: any) => ({
-        text: req?.requirement_de || req?.text,
-        source_document: req?.source_document || "",
-        source_chunk_id: req?.source_chunk_id ?? null,
-      }))
-      .filter((req: any) => req.text);
-
-    // Map risks with source tracking (TOP 5 only)
-    const legalRisksWithSource = risks
-      .slice(0, 5)
-      .map((risk: any) => ({
-        text: risk?.risk_de || risk?.text,
-        source_document: risk?.source_document || "",
-        source_chunk_id: risk?.source_chunk_id ?? null,
-      }))
-      .filter((risk: any) => risk.text);
-
-    // Map evaluation criteria with source
-    const evaluationCriteriaWithSource = evaluationCriteria
-      .map((crit: any) => ({
-        text: typeof crit === 'string' ? crit : (crit?.criterion_de || crit?.text),
-        source_document: typeof crit === 'object' ? crit?.source_document || "" : "",
-        source_chunk_id: typeof crit === 'object' ? (crit?.source_chunk_id ?? null) : null,
-      }))
-      .filter((crit: any) => crit.text);
+    const submissionWithSource = pickTopRequirements(requirements, meta.source_document);
+    const legalRisksWithSource = pickTopRisks(risks, meta.source_document);
+    const evaluationCriteriaWithSource = pickTopCriteria(evaluationCriteria, meta.source_document);
 
     // Map missing evidence with source
     const missingEvidenceWithSource = missingEvidence
       .map((doc: any) => ({
         text: doc?.document_de || doc?.text,
-        source_document: doc?.source_document || "",
+        source_document: doc?.source_document || meta.source_document || "",
         source_chunk_id: doc?.source_chunk_id ?? null,
       }))
-      .filter((doc: any) => doc.text);
+      .filter((doc: any) => doc.text && !isPlaceholder(doc.text));
 
     // Extract scope with source
     const scopeOfWorkSource: SourceInfo = {
@@ -619,6 +817,10 @@ export default function ReikanTenderAI() {
       source_document: executive.source_document || meta.source_document || "",
       source_chunk_id: null,
     };
+
+    const penalties = pickTopStrings(penaltiesRaw, 5);
+    const certifications = pickTopStrings(certificationsRaw, 5);
+    const timelineSteps = buildTimelineSteps(processSteps, timeline, meta.source_document);
 
     return {
       id: meta.tender_id || payload.summary.run_id || payload.batchId,
@@ -634,7 +836,7 @@ export default function ReikanTenderAI() {
       mustTotal: Math.min(requirements.length, 5),
       canHits: 0,
       canTotal: 0,
-      serviceTypes,
+      serviceTypes: pickTopStrings(serviceTypes, 7),
       scopeOfWork: executive.brief_description_de || "",
       scopeOfWorkSource,
       submission: submissionWithSource.map(s => s.text),
@@ -644,23 +846,23 @@ export default function ReikanTenderAI() {
       evaluationCriteriaWithSource,
       safety,
       penalties,
-      processSteps,
+      processSteps: timelineSteps,
       economicAnalysis: uiJson.economic_analysis || undefined,
       missingEvidence: missingEvidenceWithSource.map(m => m.text),
       missingEvidenceWithSource,
       sources: {
         title: meta.source_document || "",
         buyer: meta.source_document || executive.source_document || "",
-        mustCriteria: requirements[0]?.source_document || "",
-        logistics: executive.source_document || "",
-        deadline: timeline.source_document || "",
-        certifications: requirements[0]?.source_document || "",
-        scopeOfWork: executive.source_document || "",
+        mustCriteria: submissionWithSource[0]?.source_document || meta.source_document || "",
+        logistics: executive.source_document || meta.source_document || "",
+        deadline: timeline.source_document || meta.source_document || "",
+        certifications: meta.source_document || "",
+        scopeOfWork: executive.source_document || meta.source_document || "",
         pricingModel: "",
-        penalties: "",
-        evaluationCriteria: evaluationCriteria[0]?.source_document || "",
-        submission: requirements[0]?.source_document || "",
-        legalRisks: risks[0]?.source_document || "",
+        penalties: meta.source_document || "",
+        evaluationCriteria: evaluationCriteriaWithSource[0]?.source_document || meta.source_document || "",
+        submission: submissionWithSource[0]?.source_document || meta.source_document || "",
+        legalRisks: legalRisksWithSource[0]?.source_document || meta.source_document || "",
       },
     };
   };
@@ -1338,34 +1540,19 @@ function StepScan({
                   <div className="col-span-12 md:col-span-8">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="truncate font-medium" title={t.title}>{t.title}</h3>
-                      <Badge variant="secondary">{t.region === 'DE-BW' ? 'Baden-Württemberg' : t.region}</Badge>
-                      {t.serviceTypes?.slice(0, 7).map((s, i) => (
-                        <Badge key={i} className="bg-sky-100 text-sky-900">
-                          {s}
-                        </Badge>
-                      ))}
                     </div>
-                    <p className="text-sm text-zinc-600">
-                      {t.buyer} · Frist {new Date(t.deadline).toLocaleDateString('de-DE')}
-                    </p>
-                    <p className="text-xs text-zinc-500 mt-1">
-                      ID: {t.tenderId || t.id} · Status: {t.status || "unknown"}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      Erstellt: {t.createdAt ? new Date(t.createdAt).toLocaleString('de-DE') : "—"}
-                      {t.updatedAt ? ` · Aktualisiert: ${new Date(t.updatedAt).toLocaleString('de-DE')}` : ""}
-                    </p>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                      <ScorePill label="Muss" value={pct(t.mustHits, t.mustTotal)} />
-                      <ScorePill label="Kann" value={pct(t.canHits, t.canTotal)} />
-                      <ScorePill label="Gesamt" value={t.score} />
-                    </div>
+                    {t.scopeOfWork ? (
+                      <p className="text-sm text-zinc-600 mt-1 line-clamp-2">
+                        {t.scopeOfWork}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-zinc-500 mt-1 italic">Keine Kurzbeschreibung verfügbar</p>
+                    )}
                   </div>
 
                   {/* Side column */}
                   <div className="col-span-12 md:col-span-4 md:text-right">
-                    <RiskList risks={t.legalRisks} />
+                    <RiskList risks={t.legalRisks} risksWithSource={t.legalRisksWithSource} />
                     <div className="mt-3 flex items-center gap-2 md:justify-end">
                       <a
                         href={t.url}
@@ -1514,7 +1701,13 @@ function StepCriteria({
                 <h4 className="text-sm font-semibold mb-3">C. Wirtschaftlichkeit</h4>
                 <ul className="text-xs space-y-3 text-zinc-700">
                   {tender.economicAnalysis?.criticalSuccessFactors && tender.economicAnalysis.criticalSuccessFactors.length > 0 ? (
-                    tender.economicAnalysis.criticalSuccessFactors.slice(0, 3).map((factor, i) => (
+                    tender.economicAnalysis.criticalSuccessFactors
+                      .filter((factor) => {
+                        const text = typeof factor === "object" ? factor.text : factor;
+                        return text && !isPlaceholder(text);
+                      })
+                      .slice(0, 3)
+                      .map((factor, i) => (
                       <li key={i} className="flex items-start gap-2">
                         <span className="text-zinc-400 mt-0.5">•</span>
                         <div className="flex-1">
@@ -1541,7 +1734,10 @@ function StepCriteria({
                 <h4 className="text-sm font-semibold mb-3">D. Zuschlagslogik</h4>
                 <ul className="text-xs space-y-3 text-zinc-700">
                   {tender.evaluationCriteriaWithSource && tender.evaluationCriteriaWithSource.length > 0 ? (
-                    tender.evaluationCriteriaWithSource.map((criteria, i) => (
+                    tender.evaluationCriteriaWithSource
+                      .filter((criteria) => criteria.text && !isPlaceholder(criteria.text))
+                      .slice(0, 5)
+                      .map((criteria, i) => (
                       <li key={i} className="flex items-start gap-2">
                         <span className="text-zinc-400 mt-0.5">•</span>
                         <div className="flex-1">
@@ -1554,7 +1750,7 @@ function StepCriteria({
                       </li>
                     ))
                   ) : tender.evaluationCriteria && tender.evaluationCriteria.length > 0 ? (
-                    tender.evaluationCriteria.map((criteria, i) => (
+                    tender.evaluationCriteria.slice(0, 5).map((criteria, i) => (
                       <li key={i} className="flex items-start gap-2">
                         <span className="text-zinc-400 mt-0.5">•</span>
                         <div><strong>{criteria}</strong></div>
@@ -1566,7 +1762,6 @@ function StepCriteria({
                       <div><strong>Kriterien:</strong> Standard</div>
                     </li>
                   )}
-                  <SourceBadge source={tender.sources?.evaluationCriteria} />
                 </ul>
               </div>
             </div>
@@ -1578,11 +1773,19 @@ function StepCriteria({
                 <h4 className="text-sm font-semibold mb-3">E. Top-5 Pflichtanforderungen</h4>
                 <ul className="text-xs space-y-2 mb-3">
                   {tender.submissionWithSource && tender.submissionWithSource.length > 0 ? (
-                    tender.submissionWithSource.slice(0, 5).map((req, i) => (
+                    tender.submissionWithSource
+                      .filter((req) => req.text && !isPlaceholder(req.text))
+                      .slice(0, 5)
+                      .map((req, i) => (
                       <li key={i} className="flex items-start gap-2">
                         <span className="text-zinc-400 mt-0.5">{i + 1}.</span>
                         <div className="flex-1">
                           <span>{req.text}</span>
+                          {req.detail && !isPlaceholder(req.detail) && (
+                            <div className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">
+                              {req.detail}
+                            </div>
+                          )}
                           <DocumentSourceInline
                             source_document={req.source_document}
                             source_chunk_id={req.source_chunk_id}
@@ -1615,6 +1818,46 @@ function StepCriteria({
                   )}
                 </div>
                 <SourceBadge source={tender.sources?.legalRisks} />
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h4 className="text-sm font-semibold mb-3">Vertragsstrafen</h4>
+                {tender.penalties && tender.penalties.length > 0 ? (
+                  <ul className="text-xs space-y-2 text-zinc-700">
+                    {tender.penalties
+                      .filter((penalty) => penalty && !isPlaceholder(penalty))
+                      .slice(0, 5)
+                      .map((penalty, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-amber-600 mt-0.5">•</span>
+                          <span className="line-clamp-2">{penalty}</span>
+                        </li>
+                      ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-zinc-500 italic">Keine Vertragsstrafen angegeben</p>
+                )}
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold mb-3">Zertifizierungen erforderlich</h4>
+                {tender.certifications && tender.certifications.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {tender.certifications
+                      .filter((cert) => cert && !isPlaceholder(cert))
+                      .slice(0, 5)
+                      .map((cert, i) => (
+                        <Badge key={i} variant="outline" className="text-xs">
+                          {cert}
+                        </Badge>
+                      ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-500 italic">Keine Zertifizierungen angegeben</p>
+                )}
               </div>
             </div>
 
@@ -1700,75 +1943,83 @@ function StepCriteria({
           <CardContent>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
-                  <p className="text-xs text-emerald-700 font-medium mb-1">Potenzielle Marge</p>
-                  <p className="text-xl font-bold text-emerald-900">
-                    {typeof tender.economicAnalysis?.potentialMargin === 'object'
-                      ? tender.economicAnalysis.potentialMargin?.text
-                      : tender.economicAnalysis?.potentialMargin || 'Nicht verfügbar'}
-                  </p>
-                  <p className="text-xs text-emerald-600 mt-1">Bei optimaler Auslastung</p>
-                </div>
-                <div className="p-3 bg-blue-50 rounded border border-blue-200">
-                  <p className="text-xs text-blue-700 font-medium mb-1">Auftragswert (geschätzt)</p>
-                  <p className="text-xl font-bold text-blue-900">
-                    {typeof tender.economicAnalysis?.orderValueEstimated === 'object'
-                      ? tender.economicAnalysis.orderValueEstimated?.text
-                      : tender.economicAnalysis?.orderValueEstimated || 'Nicht verfügbar'}
-                  </p>
-                  <p className="text-xs text-blue-600 mt-1">Abhängig von Geräteumfang</p>
-                </div>
+                {getEconomicText(tender.economicAnalysis?.potentialMargin) && (
+                  <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
+                    <p className="text-xs text-emerald-700 font-medium mb-1">Potenzielle Marge</p>
+                    <p className="text-xl font-bold text-emerald-900">
+                      {getEconomicText(tender.economicAnalysis?.potentialMargin)}
+                    </p>
+                  </div>
+                )}
+                {getEconomicText(tender.economicAnalysis?.orderValueEstimated) && (
+                  <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                    <p className="text-xs text-blue-700 font-medium mb-1">Auftragswert (geschätzt)</p>
+                    <p className="text-xl font-bold text-blue-900">
+                      {getEconomicText(tender.economicAnalysis?.orderValueEstimated)}
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <div className="p-3 bg-zinc-50 rounded border border-zinc-200 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-600">Wettbewerbsintensität</span>
-                  <span className="font-semibold text-zinc-900">
-                    {(typeof tender.economicAnalysis?.competitiveIntensity === 'object'
-                      ? tender.economicAnalysis.competitiveIntensity?.text
-                      : tender.economicAnalysis?.competitiveIntensity) || (tender.score > 85 ? 'Hoch' : 'Mittel')}
-                  </span>
+              {(getEconomicText(tender.economicAnalysis?.competitiveIntensity) ||
+                getEconomicText(tender.economicAnalysis?.logisticsCosts) ||
+                getEconomicText(tender.economicAnalysis?.contractRisk)) && (
+                <div className="p-3 bg-zinc-50 rounded border border-zinc-200 space-y-2">
+                  {getEconomicText(tender.economicAnalysis?.competitiveIntensity) && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-zinc-600">Wettbewerbsintensität</span>
+                      <span className="font-semibold text-zinc-900">
+                        {getEconomicText(tender.economicAnalysis?.competitiveIntensity)}
+                      </span>
+                    </div>
+                  )}
+                  {getEconomicText(tender.economicAnalysis?.logisticsCosts) && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-zinc-600">Logistik-Aufwand</span>
+                      <span className="font-semibold text-zinc-900">
+                        {getEconomicText(tender.economicAnalysis?.logisticsCosts)}
+                      </span>
+                    </div>
+                  )}
+                  {getEconomicText(tender.economicAnalysis?.contractRisk) && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-zinc-600">Vertragsrisiko</span>
+                      <span className="font-semibold text-amber-600">
+                        {getEconomicText(tender.economicAnalysis?.contractRisk)}
+                      </span>
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-600">Logistik-Aufwand</span>
-                  <span className="font-semibold text-zinc-900">
-                    {(typeof tender.economicAnalysis?.logisticsCosts === 'object'
-                      ? tender.economicAnalysis.logisticsCosts?.text
-                      : tender.economicAnalysis?.logisticsCosts) || (routeScore > 75 ? 'Niedrig' : routeScore > 50 ? 'Mittel' : 'Hoch')}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-zinc-600">Vertragsrisiko</span>
-                  <span className="font-semibold text-amber-600">
-                    {(typeof tender.economicAnalysis?.contractRisk === 'object'
-                      ? tender.economicAnalysis.contractRisk?.text
-                      : tender.economicAnalysis?.contractRisk) || (tender.legalRisks.length > 3 ? 'Erhöht' : 'Normal')}
-                  </span>
-                </div>
-              </div>
+              )}
 
-              {tender.economicAnalysis?.criticalSuccessFactors && tender.economicAnalysis.criticalSuccessFactors.length > 0 ? (
+              {tender.economicAnalysis?.criticalSuccessFactors &&
+              tender.economicAnalysis.criticalSuccessFactors.some((factor) => {
+                const text = typeof factor === "object" ? factor.text : factor;
+                return text && !isPlaceholder(text);
+              }) ? (
                 <div className="pt-2 border-t border-zinc-200">
                   <p className="text-xs font-medium text-zinc-700 mb-2">Kritische Erfolgsfaktoren:</p>
                   <ul className="text-xs space-y-1 text-zinc-600">
-                    {tender.economicAnalysis.criticalSuccessFactors.map((factor, i) => (
-                      <li key={i} className="flex items-center gap-1">
-                        <span>• {typeof factor === 'object' ? factor.text : factor}</span>
-                        {typeof factor === 'object' && factor.source_document && (
-                          <DocumentSourceInline
-                            source_document={factor.source_document}
-                            source_chunk_id={factor.source_chunk_id}
-                          />
-                        )}
-                      </li>
-                    ))}
+                    {tender.economicAnalysis.criticalSuccessFactors
+                      .filter((factor) => {
+                        const text = typeof factor === "object" ? factor.text : factor;
+                        return text && !isPlaceholder(text);
+                      })
+                      .slice(0, 3)
+                      .map((factor, i) => (
+                        <li key={i} className="flex items-center gap-1">
+                          <span>• {typeof factor === "object" ? factor.text : factor}</span>
+                          {typeof factor === "object" && factor.source_document && (
+                            <DocumentSourceInline
+                              source_document={factor.source_document}
+                              source_chunk_id={factor.source_chunk_id}
+                            />
+                          )}
+                        </li>
+                      ))}
                   </ul>
                 </div>
-              ) : (
-                <div className="pt-2 border-t border-zinc-200">
-                  <p className="text-xs text-zinc-500 italic">Keine Erfolgsfaktoren verfügbar</p>
-                </div>
-              )}
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -1808,7 +2059,10 @@ function StepCriteria({
 
             <div className="space-y-2">
               {tender.processSteps && tender.processSteps.length > 0 ? (
-                tender.processSteps.map((step) => (
+                tender.processSteps
+                  .filter((step) => step.title_de && !isPlaceholder(step.title_de))
+                  .slice(0, 6)
+                  .map((step) => (
                   <div key={step.step} className="flex items-start gap-3 p-2 bg-zinc-50 rounded">
                     <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold shrink-0">
                       {step.step}
@@ -1817,7 +2071,12 @@ function StepCriteria({
                       <p className="text-sm font-medium text-zinc-900">
                         {step.title_de || `Schritt ${step.step}`} {step.days_de && `(${step.days_de})`}
                       </p>
-                      <p className="text-xs text-zinc-600">{step.description_de || ''}</p>
+                      {step.description_de && !isPlaceholder(step.description_de) && (
+                        <p className="text-xs text-zinc-600">{step.description_de}</p>
+                      )}
+                      {step.source_document && (
+                        <DocumentSourceInline source_document={step.source_document} />
+                      )}
                     </div>
                   </div>
                 ))
@@ -3071,13 +3330,16 @@ function ScorePill({ label, value }: { label: string; value: number }) {
 function RiskList({ risks, risksWithSource, large = false }: { risks?: string[]; risksWithSource?: SourceInfo[]; large?: boolean }) {
   // Prefer risksWithSource if available
   if (risksWithSource && risksWithSource.length > 0) {
+    const filtered = risksWithSource
+      .filter((risk) => risk.text && !isPlaceholder(risk.text))
+      .slice(0, 5);
     return (
       <div className={`grid ${large ? "gap-2" : "gap-1"}`}>
-        {risksWithSource.map((r, i) => (
+        {filtered.map((r, i) => (
           <div key={i} className={`inline-flex items-start gap-2 ${large ? "text-sm" : "text-xs"} text-amber-700`}>
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
             <div className="flex-1">
-              {r.text}
+              <div className="line-clamp-2">{r.text}</div>
               <DocumentSourceInline
                 source_document={r.source_document}
                 source_chunk_id={r.source_chunk_id}
@@ -3093,16 +3355,16 @@ function RiskList({ risks, risksWithSource, large = false }: { risks?: string[];
   if (!risks?.length) return <span className="text-xs text-zinc-400">Keine Risiken erkannt</span>;
   return (
     <div className={`grid ${large ? "gap-2" : "gap-1"}`}>
-      {risks.map((r, i) => {
+      {risks.slice(0, 5).map((r, i) => {
         const text =
           typeof r === "string"
             ? r
             : (r?.risk_de || r?.risk || r?.text || "");
-        if (!text) return null;
+        if (!text || isPlaceholder(text)) return null;
         return (
         <span key={i} className={`inline-flex items-center gap-2 ${large ? "text-sm" : "text-xs"} text-amber-700`}>
           <AlertTriangle className="h-4 w-4" />
-          {text}
+          <span className="line-clamp-2">{text}</span>
         </span>
         );
       })}
