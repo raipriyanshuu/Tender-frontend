@@ -700,6 +700,26 @@ export default function ReikanTenderAI() {
     fetchTenders();
   }, [sortKey]);
 
+  // Re-fetch tender details when navigating to Overview tab (step 2)
+  useEffect(() => {
+    const refetchTenderDetails = async () => {
+      if (step === 2 && selected?.runId) {
+        try {
+          setLoadingTenderDetails(true);
+          const freshDetails = await fetchTenderDetails(selected.runId);
+          setSelected(freshDetails);
+        } catch (error) {
+          console.error('Failed to re-fetch tender details:', error);
+          // Keep existing data if re-fetch fails
+        } finally {
+          setLoadingTenderDetails(false);
+        }
+      }
+    };
+
+    refetchTenderDetails();
+  }, [step, selected?.runId]);
+
   // keyboard step nav
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1718,7 +1738,7 @@ function StepCriteria({
                       })
                       .slice(0, 3)
                       .map((factor, i) => (
-                        <li key={i} className="flex items-start gap-2">
+                        <li key={`economic-factor-${typeof factor === 'object' ? factor.text?.substring(0, 30) : factor?.substring(0, 30)}-${i}`} className="flex items-start gap-2">
                           <span className="text-zinc-400 mt-0.5">•</span>
                           <div className="flex-1">
                             <span className="font-medium">{typeof factor === 'object' ? factor.text : factor}</span>
@@ -1748,7 +1768,7 @@ function StepCriteria({
                       .filter((criteria) => criteria.text && !isPlaceholder(criteria.text))
                       .slice(0, 5)
                       .map((criteria, i) => (
-                        <li key={i} className="flex items-start gap-2">
+                        <li key={`eval-criteria-src-${criteria.text?.substring(0, 30)}-${criteria.source_document}-${i}`} className="flex items-start gap-2">
                           <span className="text-zinc-400 mt-0.5">•</span>
                           <div className="flex-1">
                             <span className="font-medium">{criteria.text}</span>
@@ -1761,7 +1781,7 @@ function StepCriteria({
                       ))
                   ) : tender.evaluationCriteria && tender.evaluationCriteria.length > 0 ? (
                     tender.evaluationCriteria.slice(0, 5).map((criteria, i) => (
-                      <li key={i} className="flex items-start gap-2">
+                      <li key={`eval-criteria-${criteria?.substring(0, 30)}-${i}`} className="flex items-start gap-2">
                         <span className="text-zinc-400 mt-0.5">•</span>
                         <div><strong>{criteria}</strong></div>
                       </li>
@@ -1787,7 +1807,7 @@ function StepCriteria({
                       .filter((req) => req.text && !isPlaceholder(req.text))
                       .slice(0, 5)
                       .map((req, i) => (
-                        <li key={i} className="flex items-start gap-2">
+                        <li key={`req-src-${req.text?.substring(0, 30)}-${req.source_document}-${i}`} className="flex items-start gap-2">
                           <span className="text-zinc-400 mt-0.5">{i + 1}.</span>
                           <div className="flex-1">
                             <span>{req.text}</span>
@@ -1805,7 +1825,7 @@ function StepCriteria({
                       ))
                   ) : tender.submission && tender.submission.length > 0 ? (
                     tender.submission.slice(0, 5).map((req, i) => (
-                      <li key={i} className="flex items-start gap-2">
+                      <li key={`req-${req?.substring(0, 30)}-${i}`} className="flex items-start gap-2">
                         <span className="text-zinc-400 mt-0.5">{i + 1}.</span>
                         <span>{req}</span>
                       </li>
@@ -1842,7 +1862,7 @@ function StepCriteria({
                       .filter((penalty) => penalty && !isPlaceholder(penalty))
                       .slice(0, 5)
                       .map((penalty, i) => (
-                        <li key={i} className="flex items-start gap-2">
+                        <li key={`penalty-${penalty?.substring(0, 30)}-${i}`} className="flex items-start gap-2">
                           <span className="text-amber-600 mt-0.5">•</span>
                           <span className="line-clamp-2">{penalty}</span>
                         </li>
@@ -1860,7 +1880,7 @@ function StepCriteria({
                       .filter((cert) => cert && !isPlaceholder(cert))
                       .slice(0, 5)
                       .map((cert, i) => (
-                        <Badge key={i} variant="outline" className="text-xs">
+                        <Badge key={`cert-${cert?.substring(0, 30)}-${i}`} variant="outline" className="text-xs">
                           {cert}
                         </Badge>
                       ))}
@@ -1919,7 +1939,7 @@ function StepCriteria({
               {tender.submission && tender.submission.length > 0 ? (
                 <div className="space-y-2">
                   {tender.submission.map((doc, idx) => (
-                    <div key={idx} className="flex items-start gap-2 text-sm p-2 bg-zinc-50 rounded border border-zinc-200">
+                    <div key={`submission-doc-${doc?.substring(0, 30)}-${idx}`} className="flex items-start gap-2 text-sm p-2 bg-zinc-50 rounded border border-zinc-200">
                       <CheckCircle2 className="h-4 w-4 text-zinc-400 mt-0.5 shrink-0" />
                       <span className="text-zinc-700">{doc}</span>
                     </div>
@@ -2017,7 +2037,7 @@ function StepCriteria({
                       })
                       .slice(0, 3)
                       .map((factor, i) => (
-                        <li key={i} className="flex items-center gap-1">
+                        <li key={`success-factor-${typeof factor === 'object' ? factor.text?.substring(0, 30) : factor?.substring(0, 30)}-${i}`} className="flex items-center gap-1">
                           <span>• {typeof factor === "object" ? factor.text : factor}</span>
                           {typeof factor === "object" && factor.source_document && (
                             <DocumentSourceInline
@@ -2050,7 +2070,7 @@ function StepCriteria({
                 .filter((crit) => crit.text && !isPlaceholder(crit.text))
                 .slice(0, 5)
                 .map((crit, idx) => (
-                  <div key={idx} className="flex items-start gap-2 p-3 bg-zinc-50 rounded border border-zinc-200">
+                  <div key={`eval-crit-card-${crit.text?.substring(0, 30)}-${crit.source_document}-${idx}`} className="flex items-start gap-2 p-3 bg-zinc-50 rounded border border-zinc-200">
                     <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-zinc-900">{crit.text}</p>
