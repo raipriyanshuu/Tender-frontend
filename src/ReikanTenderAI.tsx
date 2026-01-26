@@ -57,7 +57,7 @@ interface Tender {
   title: string;
   buyer: string;
   region: string;
-  deadline: string; // ISO
+  deadline: string | null; // ISO date or null if missing
   url: string;
   score: number; // overall match score 0..100
   legalRisks: string[];
@@ -87,6 +87,7 @@ interface Tender {
     source_document?: string; // NEW: Source tracking
     source_chunk_id?: string | null;
   }>;
+  projectDuration?: string | null;  // Timeline project duration (e.g., "24 Monate")
   economicAnalysis?: { // Economic analysis (from economic_analysis)
     potentialMargin?: { text: string | null; source_document: string | null } | string | null;
     orderValueEstimated?: { text: string | null; source_document: string | null } | string | null;
@@ -232,7 +233,11 @@ const pickTopRisks = (risks: any[], metaSource?: string) => {
     const source_chunk_id = risk?.source_chunk_id ?? null;
     if (deduped.has(key)) {
       const existing = deduped.get(key)!;
-      existing.source_document = mergeSourceDocuments(existing.source_document, source_document);
+      // Create a new object instead of mutating
+      deduped.set(key, {
+        ...existing,
+        source_document: mergeSourceDocuments(existing.source_document, source_document)
+      });
       return;
     }
     deduped.set(key, { text, source_document, source_chunk_id, severity, index });
@@ -308,7 +313,11 @@ const pickTopCriteria = (criteria: any[], metaSource?: string) => {
     if (weight > existing.weight) {
       seen.set(key, { text, weight, source_document, source_chunk_id });
     } else {
-      existing.source_document = mergeSourceDocuments(existing.source_document, source_document);
+      // Create a new object instead of mutating
+      seen.set(key, {
+        ...existing,
+        source_document: mergeSourceDocuments(existing.source_document, source_document)
+      });
     }
   });
 
@@ -778,7 +787,8 @@ export default function ReikanTenderAI() {
   };
 
   const mapSummaryToTender = (payload: BatchSummaryPayload): Tender => {
-    const uiJson = payload.summary.ui_json || {};
+    // Deep clone the payload to prevent mutation of cached data
+    const uiJson = JSON.parse(JSON.stringify(payload.summary.ui_json || {}));
     const meta = uiJson.meta || {};
     const executive = uiJson.executive_summary || {};
     const timeline = uiJson.timeline_milestones || {};
@@ -794,9 +804,8 @@ export default function ReikanTenderAI() {
     const processSteps = Array.isArray(uiJson.process_steps) ? uiJson.process_steps : [];
     const missingEvidence = Array.isArray(uiJson.missing_evidence_documents) ? uiJson.missing_evidence_documents : [];
 
-    const deadline =
-      timeline.submission_deadline_de ||
-      new Date().toISOString().split('T')[0];
+    // Don't hardcode deadline - show as missing if not available
+    const deadline = timeline.submission_deadline_de || null;
 
     const submissionWithSource = pickTopRequirements(requirements, meta.source_document);
     const legalRisksWithSource = pickTopRisks(risks, meta.source_document);
@@ -824,8 +833,8 @@ export default function ReikanTenderAI() {
 
     return {
       id: meta.tender_id || payload.summary.run_id || payload.batchId,
-      title: meta.tender_title || executive.title_de || meta.tender_id || "Ausschreibung",
-      buyer: meta.organization || executive.organization_de || "Auftraggeber",
+      title: meta.tender_title || executive.title_de || meta.tender_id || "Missing Title",
+      buyer: meta.organization || executive.organization_de || "Missing Organization",
       region: executive.location_de || "DE",
       deadline,
       url: "",
@@ -847,6 +856,7 @@ export default function ReikanTenderAI() {
       safety,
       penalties,
       processSteps: timelineSteps,
+      projectDuration: timeline.project_duration_de || null,
       economicAnalysis: uiJson.economic_analysis || undefined,
       missingEvidence: missingEvidenceWithSource.map(m => m.text),
       missingEvidenceWithSource,
@@ -949,7 +959,7 @@ export default function ReikanTenderAI() {
           title: selected.title,
           buyer: selected.buyer,
           region: selected.region,
-          deadline: selected.deadline,
+          deadline: selected.deadline || new Date().toISOString().split('T')[0],
           url: selected.url,
           score: selected.score,
           legal_risks: selected.legalRisks,
@@ -1708,19 +1718,19 @@ function StepCriteria({
                       })
                       .slice(0, 3)
                       .map((factor, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="text-zinc-400 mt-0.5">•</span>
-                        <div className="flex-1">
-                          <span className="font-medium">{typeof factor === 'object' ? factor.text : factor}</span>
-                          {typeof factor === 'object' && factor.source_document && (
-                            <DocumentSourceInline
-                              source_document={factor.source_document}
-                              source_chunk_id={factor.source_chunk_id}
-                            />
-                          )}
-                        </div>
-                      </li>
-                    ))
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-zinc-400 mt-0.5">•</span>
+                          <div className="flex-1">
+                            <span className="font-medium">{typeof factor === 'object' ? factor.text : factor}</span>
+                            {typeof factor === 'object' && factor.source_document && (
+                              <DocumentSourceInline
+                                source_document={factor.source_document}
+                                source_chunk_id={factor.source_chunk_id}
+                              />
+                            )}
+                          </div>
+                        </li>
+                      ))
                   ) : (
                     <li className="flex items-start gap-2">
                       <span className="text-zinc-400 mt-0.5">•</span>
@@ -1738,17 +1748,17 @@ function StepCriteria({
                       .filter((criteria) => criteria.text && !isPlaceholder(criteria.text))
                       .slice(0, 5)
                       .map((criteria, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="text-zinc-400 mt-0.5">•</span>
-                        <div className="flex-1">
-                          <span className="font-medium">{criteria.text}</span>
-                          <DocumentSourceInline
-                            source_document={criteria.source_document}
-                            source_chunk_id={criteria.source_chunk_id}
-                          />
-                        </div>
-                      </li>
-                    ))
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-zinc-400 mt-0.5">•</span>
+                          <div className="flex-1">
+                            <span className="font-medium">{criteria.text}</span>
+                            <DocumentSourceInline
+                              source_document={criteria.source_document}
+                              source_chunk_id={criteria.source_chunk_id}
+                            />
+                          </div>
+                        </li>
+                      ))
                   ) : tender.evaluationCriteria && tender.evaluationCriteria.length > 0 ? (
                     tender.evaluationCriteria.slice(0, 5).map((criteria, i) => (
                       <li key={i} className="flex items-start gap-2">
@@ -1777,22 +1787,22 @@ function StepCriteria({
                       .filter((req) => req.text && !isPlaceholder(req.text))
                       .slice(0, 5)
                       .map((req, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="text-zinc-400 mt-0.5">{i + 1}.</span>
-                        <div className="flex-1">
-                          <span>{req.text}</span>
-                          {req.detail && !isPlaceholder(req.detail) && (
-                            <div className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">
-                              {req.detail}
-                            </div>
-                          )}
-                          <DocumentSourceInline
-                            source_document={req.source_document}
-                            source_chunk_id={req.source_chunk_id}
-                          />
-                        </div>
-                      </li>
-                    ))
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-zinc-400 mt-0.5">{i + 1}.</span>
+                          <div className="flex-1">
+                            <span>{req.text}</span>
+                            {req.detail && !isPlaceholder(req.detail) && (
+                              <div className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">
+                                {req.detail}
+                              </div>
+                            )}
+                            <DocumentSourceInline
+                              source_document={req.source_document}
+                              source_chunk_id={req.source_chunk_id}
+                            />
+                          </div>
+                        </li>
+                      ))
                   ) : tender.submission && tender.submission.length > 0 ? (
                     tender.submission.slice(0, 5).map((req, i) => (
                       <li key={i} className="flex items-start gap-2">
@@ -1964,39 +1974,39 @@ function StepCriteria({
               {(getEconomicText(tender.economicAnalysis?.competitiveIntensity) ||
                 getEconomicText(tender.economicAnalysis?.logisticsCosts) ||
                 getEconomicText(tender.economicAnalysis?.contractRisk)) && (
-                <div className="p-3 bg-zinc-50 rounded border border-zinc-200 space-y-2">
-                  {getEconomicText(tender.economicAnalysis?.competitiveIntensity) && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-zinc-600">Wettbewerbsintensität</span>
-                      <span className="font-semibold text-zinc-900">
-                        {getEconomicText(tender.economicAnalysis?.competitiveIntensity)}
-                      </span>
-                    </div>
-                  )}
-                  {getEconomicText(tender.economicAnalysis?.logisticsCosts) && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-zinc-600">Logistik-Aufwand</span>
-                      <span className="font-semibold text-zinc-900">
-                        {getEconomicText(tender.economicAnalysis?.logisticsCosts)}
-                      </span>
-                    </div>
-                  )}
-                  {getEconomicText(tender.economicAnalysis?.contractRisk) && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-zinc-600">Vertragsrisiko</span>
-                      <span className="font-semibold text-amber-600">
-                        {getEconomicText(tender.economicAnalysis?.contractRisk)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
+                  <div className="p-3 bg-zinc-50 rounded border border-zinc-200 space-y-2">
+                    {getEconomicText(tender.economicAnalysis?.competitiveIntensity) && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-600">Wettbewerbsintensität</span>
+                        <span className="font-semibold text-zinc-900">
+                          {getEconomicText(tender.economicAnalysis?.competitiveIntensity)}
+                        </span>
+                      </div>
+                    )}
+                    {getEconomicText(tender.economicAnalysis?.logisticsCosts) && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-600">Logistik-Aufwand</span>
+                        <span className="font-semibold text-zinc-900">
+                          {getEconomicText(tender.economicAnalysis?.logisticsCosts)}
+                        </span>
+                      </div>
+                    )}
+                    {getEconomicText(tender.economicAnalysis?.contractRisk) && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-zinc-600">Vertragsrisiko</span>
+                        <span className="font-semibold text-amber-600">
+                          {getEconomicText(tender.economicAnalysis?.contractRisk)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
               {tender.economicAnalysis?.criticalSuccessFactors &&
-              tender.economicAnalysis.criticalSuccessFactors.some((factor) => {
-                const text = typeof factor === "object" ? factor.text : factor;
-                return text && !isPlaceholder(text);
-              }) ? (
+                tender.economicAnalysis.criticalSuccessFactors.some((factor) => {
+                  const text = typeof factor === "object" ? factor.text : factor;
+                  return text && !isPlaceholder(text);
+                }) ? (
                 <div className="pt-2 border-t border-zinc-200">
                   <p className="text-xs font-medium text-zinc-700 mb-2">Kritische Erfolgsfaktoren:</p>
                   <ul className="text-xs space-y-1 text-zinc-600">
@@ -2025,6 +2035,41 @@ function StepCriteria({
         </Card>
       </div>
 
+      {/* Evaluation Criteria Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <SlidersHorizontal className="h-4 w-4" />
+            Bewertungskriterien
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {tender.evaluationCriteriaWithSource && tender.evaluationCriteriaWithSource.length > 0 ? (
+              tender.evaluationCriteriaWithSource
+                .filter((crit) => crit.text && !isPlaceholder(crit.text))
+                .slice(0, 5)
+                .map((crit, idx) => (
+                  <div key={idx} className="flex items-start gap-2 p-3 bg-zinc-50 rounded border border-zinc-200">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-zinc-900">{crit.text}</p>
+                      {crit.source_document && (
+                        <DocumentSourceInline
+                          source_document={crit.source_document}
+                          source_chunk_id={crit.source_chunk_id}
+                        />
+                      )}
+                    </div>
+                  </div>
+                ))
+            ) : (
+              <p className="text-sm text-zinc-500 italic">Keine Bewertungskriterien verfügbar</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -2037,9 +2082,25 @@ function StepCriteria({
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="p-3 bg-blue-50 rounded border border-blue-200">
                 <p className="text-xs text-blue-700 font-medium mb-1">Abgabefrist</p>
-                <p className="text-sm font-bold text-blue-900">{new Date(tender.deadline).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-                <p className="text-xs text-blue-600 mt-1">{Math.ceil((new Date(tender.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} Tage verbleibend</p>
+                {tender.deadline ? (
+                  <>
+                    <p className="text-sm font-bold text-blue-900">
+                      {new Date(tender.deadline).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      {Math.ceil((new Date(tender.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} Tage verbleibend
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm font-semibold text-amber-600">Missing</p>
+                )}
               </div>
+              {tender.projectDuration && (
+                <div className="p-3 bg-emerald-50 rounded border border-emerald-200">
+                  <p className="text-xs text-emerald-700 font-medium mb-1">Projektdauer</p>
+                  <p className="text-sm font-bold text-emerald-900">{tender.projectDuration}</p>
+                </div>
+              )}
               <div className="p-3 bg-zinc-50 rounded border border-zinc-200">
                 <p className="text-xs text-zinc-700 font-medium mb-1">Vorbereitung</p>
                 <p className="text-sm font-bold text-zinc-900">3-5 Tage</p>
@@ -2063,23 +2124,23 @@ function StepCriteria({
                   .filter((step) => step.title_de && !isPlaceholder(step.title_de))
                   .slice(0, 6)
                   .map((step) => (
-                  <div key={step.step} className="flex items-start gap-3 p-2 bg-zinc-50 rounded">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                      {step.step}
+                    <div key={step.step} className="flex items-start gap-3 p-2 bg-zinc-50 rounded">
+                      <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                        {step.step}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-zinc-900">
+                          {step.title_de || `Schritt ${step.step}`} {step.days_de && `(${step.days_de})`}
+                        </p>
+                        {step.description_de && !isPlaceholder(step.description_de) && (
+                          <p className="text-xs text-zinc-600">{step.description_de}</p>
+                        )}
+                        {step.source_document && (
+                          <DocumentSourceInline source_document={step.source_document} />
+                        )}
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-zinc-900">
-                        {step.title_de || `Schritt ${step.step}`} {step.days_de && `(${step.days_de})`}
-                      </p>
-                      {step.description_de && !isPlaceholder(step.description_de) && (
-                        <p className="text-xs text-zinc-600">{step.description_de}</p>
-                      )}
-                      {step.source_document && (
-                        <DocumentSourceInline source_document={step.source_document} />
-                      )}
-                    </div>
-                  </div>
-                ))
+                  ))
               ) : (
                 <p className="text-sm text-zinc-500 italic p-2">Keine Prozessschritte verfügbar</p>
               )}
@@ -3362,10 +3423,10 @@ function RiskList({ risks, risksWithSource, large = false }: { risks?: string[];
             : (r?.risk_de || r?.risk || r?.text || "");
         if (!text || isPlaceholder(text)) return null;
         return (
-        <span key={i} className={`inline-flex items-center gap-2 ${large ? "text-sm" : "text-xs"} text-amber-700`}>
-          <AlertTriangle className="h-4 w-4" />
-          <span className="line-clamp-2">{text}</span>
-        </span>
+          <span key={i} className={`inline-flex items-center gap-2 ${large ? "text-sm" : "text-xs"} text-amber-700`}>
+            <AlertTriangle className="h-4 w-4" />
+            <span className="line-clamp-2">{text}</span>
+          </span>
         );
       })}
     </div>
