@@ -1695,7 +1695,11 @@ function StepCriteria({
   improvingScore: boolean;
 }) {
   const goNoGo = tender.score >= 70 && pct(tender.mustHits, tender.mustTotal) >= 80 ? 'GO' : 'NO-GO';
-
+  const [expanded, setExpanded] = useState(false);
+  const limit = 400;
+  const scope = tender.scopeOfWork ?? "";
+  const scopeShort = scope.length > limit ? scope.slice(0, limit) + "..." : scope;
+  
   return (
     <div className="grid grid-cols-1 gap-4">
       <Card>
@@ -1711,12 +1715,20 @@ function StepCriteria({
           <div className="space-y-3">
             <div>
               <h4 className="text-sm font-semibold mb-1">Kurzbeschreibung</h4>
-              <p className="text-sm text-zinc-700">
-                {tender.buyer} sucht {tender.title}. Leistungsort: {tender.region}.{' '}
-                {tender.scopeOfWork && (
-                  `${tender.scopeOfWork.substring(0, 350)}${tender.scopeOfWork.length > 350 ? '...' : ''}`
-                )}
-              </p>
+              <p className="text-sm text-zinc-700 whitespace-pre-wrap break-words">
+  {tender.buyer} sucht {tender.title}. Leistungsort: {tender.region}.{" "}
+  {expanded ? scope : scopeShort}
+</p>
+
+{scope.length > limit && (
+  <button
+    type="button"
+    className="text-xs text-blue-600 hover:underline"
+    onClick={() => setExpanded(v => !v)}
+  >
+    {expanded ? "Weniger anzeigen" : "Mehr anzeigen"}
+  </button>
+)}
               {tender.scopeOfWorkSource?.source_document && (
                 <SourceBadge source={tender.scopeOfWorkSource.source_document} />
               )}
