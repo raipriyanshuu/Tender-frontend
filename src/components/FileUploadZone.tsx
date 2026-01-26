@@ -245,7 +245,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({ onTenderCreated,
       {batchStatus && (
         <div className="border rounded-lg bg-white p-4 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-medium">Batch {activeBatchId}</span>
+            <span className="font-medium">File extraction is in process</span>
             <span className="text-zinc-600">{batchStatus.batch_status}</span>
           </div>
           <Progress value={Number(batchStatus.progress_percent || 0)} />

@@ -44,6 +44,7 @@ interface SourceInfo {
   text: string;
   source_document: string;
   source_chunk_id?: string | null;
+  page_number?: number | null;
   detail?: string;
 }
 
@@ -1776,6 +1777,7 @@ function StepCriteria({
                               <DocumentSourceInline
                                 source_document={factor.source_document}
                                 source_chunk_id={factor.source_chunk_id}
+                                page_number={factor.page_number}
                               />
                             )}
                           </div>
@@ -1805,6 +1807,7 @@ function StepCriteria({
                             <DocumentSourceInline
                               source_document={criteria.source_document}
                               source_chunk_id={criteria.source_chunk_id}
+                              page_number={criteria.page_number}
                             />
                           </div>
                         </li>
@@ -1849,6 +1852,7 @@ function StepCriteria({
                             <DocumentSourceInline
                               source_document={req.source_document}
                               source_chunk_id={req.source_chunk_id}
+                              page_number={req.page_number}
                             />
                           </div>
                         </li>
@@ -2073,6 +2077,7 @@ function StepCriteria({
                             <DocumentSourceInline
                               source_document={factor.source_document}
                               source_chunk_id={factor.source_chunk_id}
+                              page_number={factor.page_number}
                             />
                           )}
                         </li>
@@ -2108,6 +2113,7 @@ function StepCriteria({
                         <DocumentSourceInline
                           source_document={crit.source_document}
                           source_chunk_id={crit.source_chunk_id}
+                          page_number={crit.page_number}
                         />
                       )}
                     </div>
@@ -2186,7 +2192,7 @@ function StepCriteria({
                           <p className="text-xs text-zinc-600">{step.description_de}</p>
                         )}
                         {step.source_document && (
-                          <DocumentSourceInline source_document={step.source_document} />
+                          <DocumentSourceInline source_document={step.source_document} page_number={step.page_number} />
                         )}
                       </div>
                     </div>
@@ -3454,6 +3460,7 @@ function RiskList({ risks, risksWithSource, large = false }: { risks?: string[];
               <DocumentSourceInline
                 source_document={r.source_document}
                 source_chunk_id={r.source_chunk_id}
+                page_number={r.page_number}
               />
             </div>
           </div>
