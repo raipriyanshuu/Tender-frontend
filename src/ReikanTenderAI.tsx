@@ -647,7 +647,8 @@ export default function ReikanTenderAI() {
 
   const fetchTenderDetails = async (runId: string) => {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    const response = await fetch(`${apiUrl}/api/tenders/${runId}`);
+    // Use /api/batches/:id/summary to get consistent ui_json data from run_summaries table
+    const response = await fetch(`${apiUrl}/api/batches/${runId}/summary`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
