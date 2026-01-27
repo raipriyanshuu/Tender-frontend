@@ -1644,11 +1644,7 @@ function StepScan({
                         <p className="text-sm text-zinc-700 font-medium">{t.title}</p>
                       ) : null}
                     </div>
-                    {t.scopeOfWork && !t.scopeOfWork.toLowerCase().includes('declaration') ? (
-                      <p className="text-sm text-zinc-600 mt-1 line-clamp-2">
-                        {t.scopeOfWork}
-                      </p>
-                    ) : null}
+
                   </div>
 
                   {/* Side column */}
