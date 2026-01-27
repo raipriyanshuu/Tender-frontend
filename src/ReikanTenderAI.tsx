@@ -1595,7 +1595,7 @@ function StepScan({
                 <p className="text-xs text-zinc-500">
                   {tendersError
                     ? `API Fehler: ${tendersError}. Bitte überprüfen Sie die Backend-Verbindung.`
-                    : 'Laden Sie Dokumente über N8N hoch, um Tender zu sehen.'}
+                    : ''}
                 </p>
               </div>
             )}
